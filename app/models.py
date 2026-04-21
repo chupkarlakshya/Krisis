@@ -195,6 +195,8 @@ class StaffContact:
     phone: str
     channels: list[Channel]
     escalation_level: int
+    current_zone: str | None = None
+    last_seen: str | None = None
     on_shift: bool = True
 
     @classmethod

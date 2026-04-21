@@ -176,13 +176,20 @@
     <main class="main-content">
       <div class="panel-head" style="margin-bottom: 24px;">
         <div>
-          <p class="section-kicker">Incident Command</p>
-          <h2>Live Emergency Picture</h2>
+          <p class="section-kicker">Live Infrastructure</p>
+          <h2>Staff & Security Map</h2>
         </div>
         <div class="panel-actions">
-          <button id="refreshIncidents" class="button subtle">Refresh</button>
+          <button id="refreshMap" class="button subtle">Refresh Map</button>
         </div>
       </div>
+
+      <section id="liveMap" class="map-container">
+        <!-- Map zones and staff will be rendered here dynamically -->
+        <div id="mapZones" class="map-grid"></div>
+      </section>
+
+      <div class="panel-head" style="margin-bottom: 24px; margin-top: 40px;">
 
       <div id="commandFocus" class="command-focus empty-state">
         Select an incident to view its specific notification routing and responders.

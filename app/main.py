@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from flask import Flask, jsonify, request
-from flask_cors import CORS
 
 from app.engine import IncidentEngine
 from app.models import DetectionEvent, ManualEvent, SensorEvent, StaffContact
 
 app = Flask(__name__)
-CORS(app) # Enable CORS for cloud deployment
 engine = IncidentEngine()
 
 
@@ -99,6 +97,18 @@ def send_real_sms() -> tuple[object, int]:
         
     engine.send_real_sms_direct(payload["phone"], payload.get("message"))
     return jsonify({"sent": True}), 200
+
+
+@app.post("/sms/bulk-real")
+def send_bulk_real_sms() -> tuple[object, int]:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or "phones" not in payload:
+        return jsonify({"sent": False, "error": "missing_phones"}), 400
+        
+    message = payload.get("message", "CRITICAL ALERT: Emergency detected. Please check dashboard.")
+    for phone in payload["phones"]:
+        engine.send_real_sms_direct(phone, message)
+    return jsonify({"sent": True, "count": len(payload["phones"])}), 200
 
 
 @app.post("/twilio/receive")

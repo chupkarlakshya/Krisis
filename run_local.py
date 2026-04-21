@@ -8,7 +8,20 @@ import time
 from pathlib import Path
 
 
+import socket
+
 ROOT = Path(__file__).resolve().parent
+
+
+def get_local_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
 SERVICES = [
@@ -97,11 +110,18 @@ def main() -> int:
                 print(f"[error] {name} exited immediately with code {process.returncode}")
                 return 1
 
+        local_ip = get_local_ip()
         print()
         print("Local stack is starting on localhost:")
         print("  Backend health: http://127.0.0.1:8000/health")
         print("  Vision health:  http://127.0.0.1:8010/health")
         print("  Product UI:     http://127.0.0.1:8080/")
+        print()
+        print("--- MOBILE REMOTE ACCESS ---")
+        print(f"  SOS Portal:     http://{local_ip}:8080/sos.html")
+        print(f"  Command Center: http://{local_ip}:8080/")
+        print("  (Make sure your phone is on the same WiFi)")
+        print("----------------------------")
         print()
         print("Keep this terminal open. Press Ctrl+C to stop all services.")
 

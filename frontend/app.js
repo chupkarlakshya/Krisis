@@ -4,8 +4,8 @@ if (!localStorage.getItem("ecg_auth_token")) {
 }
 
 const state = {
-  apiBase: localStorage.getItem("ecg-api-base") || "https://crisis-grid-api.onrender.com",
-  useMock: localStorage.getItem("ecg-use-mock") === "true" || window.location.hostname !== "localhost",
+  apiBase: localStorage.getItem("ecg-api-base") || "/api",
+  useMock: localStorage.getItem("ecg-use-mock") === "true",
   incidents: [],
   events: [],
   notifications: [],
@@ -63,7 +63,8 @@ const els = {
   actionFire: document.getElementById("actionFire"),
   actionManual: document.getElementById("actionManual"),
   actionBroadcast: document.getElementById("actionBroadcast"),
-  mapZonesContainer: document.getElementById("mapZonesContainer"),
+  mapZonesContainer: document.getElementById("mapZones"),
+  refreshMap: document.getElementById("refreshMap"),
   addCamera: document.getElementById("addCamera"),
   deleteCamera: document.getElementById("deleteCamera"),
   openSystemMenu: document.getElementById("openSystemMenu"),
@@ -123,6 +124,31 @@ function loadCameraRegistry() {
 
 function saveCameraRegistry() {
   localStorage.setItem("ecg-camera-registry", JSON.stringify(state.cameraRegistry));
+}
+
+function renderMap() {
+  const zones = [
+    "Lobby", "Reception", "Kitchen", "Corridor A", "Banquet Hall", "Stairwell",
+    "Floor 1", "Floor 2", "Floor 3", "Rooftop", "Basement", "Command Center"
+  ];
+
+  els.mapZonesContainer.innerHTML = zones.map(zoneName => {
+    const isActive = state.incidents.some(i => i.location === zoneName);
+    const staffInZone = state.directory.filter(s => s.current_zone === zoneName);
+    
+    return `
+      <div class="map-zone ${isActive ? 'active-alert' : ''}">
+        <div class="zone-label">${escapeHtml(zoneName)}</div>
+        <div class="staff-marker-list">
+          ${staffInZone.map(s => `
+            <div class="staff-marker" data-name="${escapeHtml(s.name)} (${escapeHtml(s.role)})">
+              ${s.name.split(" ").map(n => n[0]).join("")}
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function init() {
@@ -567,6 +593,7 @@ function renderAll() {
   renderEvents();
   renderNotifications();
   renderDirectory();
+  renderMap();
 }
 
 async function refreshIncidents() {
@@ -711,7 +738,7 @@ function renderCommandFocus() {
 
       const isSelected = state.selectedIncidentId === incident.incident_id;
       return `
-        <article class="command-card ${index > 1 ? 'collapsed' : ''} ${isSelected ? 'selected' : ''}" 
+        <article class="command-card ${isSelected ? 'expanded' : 'collapsed'}" 
                  id="incident-${incident.incident_id}" 
                  onclick="selectIncident('${incident.incident_id}')">
           <div class="command-topline">
@@ -723,6 +750,7 @@ function renderCommandFocus() {
             <div>
               <h3>${escapeHtml(incident.summary)}</h3>
               <p class="focus-summary">${escapeHtml(incident.recommended_action)}</p>
+              ${!isSelected ? '<span style="font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px;">+ Click to expand details</span>' : ''}
             </div>
           </div>
           <div class="focus-grid">
@@ -746,7 +774,7 @@ function renderCommandFocus() {
             <div class="dispatch-actions">
               ${(incident.type === 'medical' ? [{label: "💉 First Aid", msg: "Bring First Aid Kit to location and assess patient."}, {label: "🚑 Call 911", msg: "Condition critical. Call 911 immediately."}] : incident.type === 'fire' ? [{label: "🏃 Evacuate", msg: "Evacuate zone immediately. Guide guests to assembly point."}, {label: "🧯 Extinguish", msg: "Use nearest fire extinguisher if safe. Isolate power."}] : [{label: "🔒 Lock Down", msg: "Secure all exits and isolate area. Do not confront."}, {label: "👮 Police", msg: "Call local law enforcement for backup."}]).map(t => `<button class="dispatch-btn ${incident.type}-action" onclick="event.stopPropagation(); sendQuickAction('${escapeHtml(incident.location)}', '${escapeHtml(t.msg)}')">${t.label}</button>`).join('')}
             </div>
-            <button class="btn-resolve" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(incident.location)}')">
+            <button class="btn-resolve" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(incident.incident_id)}')">
               <span>✅</span> Verify & Resolve Incident
             </button>
           </div>
@@ -794,63 +822,50 @@ function renderNotifications() {
     return;
   }
 
-  let notifications = state.notifications;
-  let filterHeader = "";
-
   const selected = state.incidents.find(i => i.incident_id === state.selectedIncidentId);
-  notifications = notifications.filter(n => n.incident_id === state.selectedIncidentId);
+  const notifications = state.notifications.filter(n => n.incident_id === state.selectedIncidentId);
   
-  filterHeader = `
-    <div style="background: rgba(184, 79, 29, 0.1); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-      <div style="font-size: 11px; font-weight: 700; color: var(--accent-strong); text-transform: uppercase;">
-        🎯 Focusing On: ${selected ? escapeHtml(selected.location) : 'Selected Incident'}
-      </div>
-      <button onclick="selectIncident(null)" style="background: var(--accent); color: white; border: none; border-radius: 4px; padding: 2px 8px; font-size: 10px; cursor: pointer;">Show All</button>
-    </div>
-  `;
-
-  if (notifications.length === 0) {
-    els.notificationList.innerHTML = filterHeader + `<div class="empty-state">No notifications have been routed for this incident yet.</div>`;
+  if (!notifications.length) {
+    els.notificationList.innerHTML = `<p class="empty-state">No notification routing active for this incident yet.</p>`;
     return;
   }
 
-  const sorted = [...notifications].sort((a, b) => {
-    if (a.status === 'acknowledged' && b.status !== 'acknowledged') return 1;
-    if (a.status !== 'acknowledged' && b.status === 'acknowledged') return -1;
-    return new Date(b.updated_at) - new Date(a.updated_at);
-  });
-
-  els.notificationList.innerHTML = filterHeader + sorted
-    .map(
-      (notification) => `
-        <article class="notification-card ${notification.status === 'acknowledged' ? 'minimized' : 'new-alert'}">
-          <div class="notification-meta">
-            <span class="badge ${notification.status}">${escapeHtml(notification.status)}</span>
-            <span class="badge">${escapeHtml(notification.channel)}</span>
-            <span class="badge">${escapeHtml(notification.recipient.role)}</span>
+  const phoneNumbers = notifications.map(n => n.recipient.phone);
+  
+  els.notificationList.innerHTML = `
+    <div style="margin-bottom: 16px; padding: 16px; background: var(--accent-strong); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(187, 62, 3, 0.3);">
+      <div style="display: flex; flex-direction: column;">
+        <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.8); letter-spacing: 1px;">Routing Status</span>
+        <span style="font-size: 14px; font-weight: 700; color: #fff;">${notifications.length} Active Responders</span>
+      </div>
+      <button class="button" style="background: #fff; color: var(--accent-strong); border: none; padding: 8px 16px; font-weight: 800; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);" onclick="sendBulkSMS(${JSON.stringify(phoneNumbers).replace(/"/g, "'")})">
+        📢 BROADCAST TO ALL
+      </button>
+    </div>
+    <div style="margin-bottom: 12px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding-left: 4px;">Responder Log</div>
+    ${notifications.map((notification) => {
+      const isNew = !notification.acknowledged_at && (new Date() - new Date(notification.created_at) < 60000);
+      return `
+        <article class="notification-card minimized ${isNew ? 'new-alert' : ''}" style="margin-bottom: 4px; padding: 10px 12px; background: #fff; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div style="flex: 1;">
+              <div style="font-size: 13px; font-weight: 800; color: #1a1a1a;">${escapeHtml(notification.recipient.name)} <span style="color: var(--accent-strong); margin-left: 8px;">${escapeHtml(notification.recipient.phone)}</span></div>
+              <div style="font-size: 10px; color: #666; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${escapeHtml(notification.recipient.role)}</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="badge ${notification.status}" style="font-size: 9px; padding: 2px 8px; font-weight: 800;">${escapeHtml(notification.status)}</span>
+              ${notification.status !== 'acknowledged' ? `
+                <button class="dispatch-btn" style="padding: 5px 10px; font-size: 10px; background: rgba(0,0,0,0.05); color: #333;" onclick="acknowledgeNotification('${notification.notification_id}')">Verify</button>
+              ` : ''}
+              <button class="dispatch-btn" style="padding: 5px 10px; font-size: 10px; background: var(--accent-strong); color: #fff; border: none;" onclick="sendRealSMS('${notification.recipient.phone}', '${escapeHtml(notification.message)}')">SMS</button>
+            </div>
           </div>
-          <h3>${escapeHtml(notification.recipient.name)} | ${escapeHtml(notification.recipient.phone)}</h3>
-          <p>${escapeHtml(notification.message)}</p>
-          <p><strong>Reason:</strong> ${escapeHtml(notification.reason || "n/a")}</p>
-          <p><strong>Updated:</strong> ${formatDate(notification.updated_at)}</p>
-          ${
-            notification.status === "acknowledged"
-              ? `<p><strong>Acknowledged:</strong> ${formatDate(notification.acknowledged_at)}</p>`
-              : `
-                <div class="operator-instruction">
-                  ACTION REQUIRED: Contact via ${escapeHtml(notification.channel).toUpperCase()} and verify status. Await response before acknowledging.
-                </div>
-                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                  <button class="button" style="border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); color: #1e40af; font-weight: 700;" onclick="sendRealSMS('${escapeHtml(notification.recipient.phone)}', '${escapeHtml(notification.message)}')">Send SMS</button>
-                  <button class="button subtle" onclick="acknowledgeNotification('${escapeHtml(notification.notification_id)}')">Acknowledge</button>
-                </div>
-              `
-          }
         </article>
-      `
-    )
-    .join("");
+      `;
+    }).join("")}
+  `;
 }
+
 
 function renderDirectory() {
   if (!state.directory) state.directory = [];
@@ -1258,5 +1273,27 @@ async function sendRealSMS(phone, message) {
 }
 
 window.sendRealSMS = sendRealSMS;
+
+async function sendBulkSMS(phones) {
+  const message = prompt("Enter broadcast message for all responders:", "CRITICAL ALERT: Emergency detected. Please check the Crisis Grid dashboard immediately.");
+  if (!message) return;
+
+  try {
+    const response = await fetch(`${state.apiBase}/sms/bulk-real`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phones, message })
+    });
+    const data = await response.json();
+    if (data.sent) {
+      alert(`Broadcast sent successfully to ${data.count} responders.`);
+    } else {
+      alert(`Broadcast failed: ${data.error}`);
+    }
+  } catch (error) {
+    alert(`System Error connecting to Broadcast service: ${error.message}`);
+  }
+}
+window.sendBulkSMS = sendBulkSMS;
 
 init();

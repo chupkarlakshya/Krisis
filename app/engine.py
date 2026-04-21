@@ -18,6 +18,7 @@ class IncidentEngine:
         self.active_incidents: dict[str, Incident] = {}
         self.location_windows: dict[str, deque[EventEnvelope]] = defaultdict(lambda: deque(maxlen=100))
         self.staff_directory = self._build_staff_directory()
+        self._init_staff_positions()
         self.notifications: deque[Notification] = deque(maxlen=300)
         self.notifications_by_incident: dict[str, list[str]] = defaultdict(list)
         self.persistence_window = timedelta(seconds=15)
@@ -107,15 +108,19 @@ class IncidentEngine:
                             logical_location = floor
                             break
 
+        # For SOS alerts, we use a unique key so they don't overwrite each other
+        # For standard manual triggers (like a fixed panic button), we stick to location grouping
+        incident_key = f"manual-{stamped.trigger_id}" if is_sos else stamped.location
+
         return self._upsert_incident(
-            location=stamped.location, # Keep key same for persistence
+            location=stamped.location,
             incident_type=itype,
             severity="critical",
             summary=summary,
             recommended_action="Dispatch immediate response team. Call location to verify status." if is_sos else "Dispatch staff immediately and follow emergency response protocol.",
             evidence=[f"source:{stamped.source}", f"trigger:{stamped.trigger_id}"],
             source="manual",
-            # We add a hidden update to logical routing if possible
+            key=incident_key
         ).with_updates(location=logical_location) if is_update else self._upsert_incident(
             location=stamped.location,
             incident_type=itype,
@@ -124,6 +129,7 @@ class IncidentEngine:
             recommended_action="Dispatch immediate response team. Call location to verify status.",
             evidence=[f"source:{stamped.source}", f"trigger:{stamped.trigger_id}"],
             source="manual",
+            key=incident_key
         )
 
     def add_broadcast(self, message: str) -> Incident:
@@ -137,20 +143,63 @@ class IncidentEngine:
             source="manual",
         )
 
+    def _init_staff_positions(self) -> None:
+        now = self._now().isoformat()
+        for s in self.staff_directory:
+            # HQ staff are at Command Center, others at their duty zone
+            s.current_zone = "Command Center" if "hq" in s.contact_id.lower() else s.zone
+            s.last_seen = now
+
+    def update_staff_location(self, contact_id: str, zone: str) -> bool:
+        for s in self.staff_directory:
+            if s.contact_id == contact_id:
+                s.current_zone = zone
+                s.last_seen = self._now().isoformat()
+                print(f"[engine] Staff {s.name} tracked at {zone}")
+                return True
+        return False
+
     def get_active_incidents(self) -> list[Incident]:
         return sorted(self.active_incidents.values(), key=lambda item: item.last_updated, reverse=True)
 
     def get_recent_events(self) -> list[EventEnvelope]:
         return list(self.events)[::-1]
 
-    def resolve_incident(self, location: str) -> bool:
-        if location in self.active_incidents:
-            print(f"[engine] Manually resolved incident at {location}")
-            del self.active_incidents[location]
-            # Also clear the window so it doesn't immediately re-trigger
-            if location in self.location_windows:
-                self.location_windows[location].clear()
+    def resolve_incident(self, identifier: str) -> bool:
+        # 1. Try to resolve by exact internal dictionary key
+        if identifier in self.active_incidents:
+            print(f"[engine] Resolving incident by key: {identifier}")
+            del self.active_incidents[identifier]
             return True
+            
+        # 2. Try to resolve by incident_id (Short UUID)
+        for key, incident in list(self.active_incidents.items()):
+            if incident.incident_id == identifier:
+                print(f"[engine] Resolving incident by ID: {identifier}")
+                del self.active_incidents[key]
+                # Also clear the window if the key matches the location
+                if key in self.location_windows:
+                    self.location_windows[key].clear()
+                return True
+                
+        # 3. Fallback to location (clears the first incident found at this location)
+        for key, incident in list(self.active_incidents.items()):
+            if incident.location == identifier:
+                print(f"[engine] Resolving incident at location fallback: {identifier}")
+                del self.active_incidents[key]
+                if identifier in self.location_windows:
+                    self.location_windows[identifier].clear()
+                return True
+                
+        return False
+
+    def update_staff_location(self, contact_id: str, zone: str) -> bool:
+        for s in self.staff_directory:
+            if s.contact_id == contact_id:
+                s.current_zone = zone
+                s.last_seen = self._now().isoformat()
+                print(f"[engine] Staff {s.name} tracked at {zone}")
+                return True
         return False
 
     def get_staff_directory(self) -> list[StaffContact]:
@@ -281,8 +330,10 @@ class IncidentEngine:
         recommended_action: str,
         evidence: list[str],
         source: Literal["ai", "manual"] = "ai",
+        key: str | None = None,
     ) -> Incident:
-        existing = self.active_incidents.get(location)
+        lookup_key = key or location
+        existing = self.active_incidents.get(lookup_key)
         now = self._now()
         if existing:
             updated = existing.with_updates(
@@ -294,7 +345,7 @@ class IncidentEngine:
                 evidence=evidence,
                 source=source,
             )
-            self.active_incidents[location] = updated
+            self.active_incidents[lookup_key] = updated
             self._sync_notifications(updated)
             return updated
 
@@ -310,7 +361,7 @@ class IncidentEngine:
             evidence=evidence,
             source=source,
         )
-        self.active_incidents[location] = incident
+        self.active_incidents[lookup_key] = incident
         self._sync_notifications(incident)
         return incident
 
@@ -406,8 +457,8 @@ class IncidentEngine:
             }
             
         def _send():
-            account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "AC_MOCK")
-            auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "TOKEN_MOCK")
+            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
             from_phone = "whatsapp:+14155238886"
             content_sid = "HXb5b62575e6e4ff6129ad7c8efe1f983e"
             
@@ -459,8 +510,8 @@ class IncidentEngine:
             message = f"CRITICAL ALERT: Emergency detected. Please check the Crisis Grid dashboard immediately."
             
         def _send():
-            account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "AC_MOCK")
-            auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "TOKEN_MOCK")
+            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
             # Using the new SMS number from your screenshot
             from_phone = "+19893345858"
             
