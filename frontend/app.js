@@ -1199,13 +1199,13 @@ function renderNotifications() {
   const phoneNumbers = notifications.map(n => n.recipient.phone);
   
   els.notificationList.innerHTML = `
-    <div style="margin-bottom: 16px; padding: 16px; background: var(--accent-strong); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(187, 62, 3, 0.3);">
+    <div style="margin-bottom: 12px; padding: 10px 16px; background: var(--accent-strong); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(187, 62, 3, 0.3);">
       <div style="display: flex; flex-direction: column;">
-        <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.8); letter-spacing: 1px;">Routing Status</span>
-        <span style="font-size: 14px; font-weight: 700; color: #fff;">${notifications.length} Active Responders</span>
+        <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.8); letter-spacing: 1px;">Routing Status</span>
+        <span style="font-size: 13px; font-weight: 700; color: #fff;">${notifications.length} Active Responders</span>
       </div>
-      <button class="button" style="background: #fff; color: var(--accent-strong); border: none; padding: 8px 16px; font-weight: 800; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);" onclick="sendBulkSMS(${JSON.stringify(phoneNumbers).replace(/"/g, "'")})">
-        📢 BROADCAST TO ALL
+      <button class="button" style="background: #fff; color: var(--accent-strong); border: none; padding: 5px 10px; font-weight: 900; font-size: 9px; letter-spacing: 0.5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);" onclick="sendBulkSMS(${JSON.stringify(phoneNumbers).replace(/"/g, "'")})">
+        📢 BROADCAST ALL
       </button>
     </div>
     <div style="margin-bottom: 12px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding-left: 4px;">Responder Log</div>

@@ -108,16 +108,23 @@ class IncidentEngine:
                             logical_location = floor
                             break
 
-        # For SOS alerts, we use a unique key so they don't overwrite each other
-        # For standard manual triggers (like a fixed panic button), we stick to location grouping
+        # For SOS alerts, we use the trigger_id as the key.
+        # If it's a LOCATION UPDATE, we attempt to find an existing active incident for "Mobile Staff"
+        # to ensure updates collapse into the same card.
         incident_key = f"manual-{stamped.trigger_id}" if is_sos else stamped.location
+        
+        if is_sos and is_update:
+            for k, inc in self.active_incidents.items():
+                if inc.location == "Mobile Staff" and inc.source == "manual":
+                    incident_key = k
+                    break
 
         return self._upsert_incident(
             location=stamped.location,
             incident_type=itype,
             severity="critical",
             summary=summary,
-            recommended_action="Dispatch immediate response team. Call location to verify status." if is_sos else "Dispatch staff immediately and follow emergency response protocol.",
+            recommended_action="Dispatch immediate response team. Call location to verify status.",
             evidence=[f"source:{stamped.source}", f"trigger:{stamped.trigger_id}"],
             source="manual",
             key=incident_key
@@ -336,13 +343,15 @@ class IncidentEngine:
         existing = self.active_incidents.get(lookup_key)
         now = self._now()
         if existing:
+            # Merge evidence instead of replacing it
+            merged_evidence = list(set(existing.evidence + evidence))
             updated = existing.with_updates(
                 type=incident_type,
                 severity=severity,
                 summary=summary,
                 recommended_action=recommended_action,
                 last_updated=now,
-                evidence=evidence,
+                evidence=merged_evidence,
                 source=source,
             )
             self.active_incidents[lookup_key] = updated

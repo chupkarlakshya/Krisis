@@ -234,6 +234,7 @@
     let selectedArea = "";
     let timerInterval = null;
     let preTimer = null;
+    let currentTriggerId = null;
 
     if (roomMode) document.getElementById('locationDisplay').textContent = roomMode;
 
@@ -247,6 +248,9 @@
       label.style.color = `var(--${type})`;
       counter.textContent = "3";
       overlay.classList.add('active');
+      
+      // Initialize a unique ID for this specific SOS session
+      currentTriggerId = `sos-${Date.now()}`;
 
       let count = 3;
       if (window.navigator.vibrate) window.navigator.vibrate([100, 100, 100]);
@@ -352,7 +356,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            trigger_id: `sos-${Date.now()}`,
+            trigger_id: currentTriggerId || `sos-${Date.now()}`,
             location: currentLocation,
             trigger_type: `${lastType}_sos`,
             source: "sos_portal",

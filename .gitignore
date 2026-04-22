@@ -1,12 +1,12 @@
-# Ignore local tools and logs
-tools/
-logs/
-*.log
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+build/
 .env
-.theia/
-.vscode/
-
-# Large demo videos (if they exceed 10MB)
-frontend/demo/stairscCamm.mp4
+.env.*
