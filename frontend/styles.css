@@ -1411,7 +1411,7 @@ input {
 .cctv-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 12px;
   flex: 1;
   min-height: 0;
 }
@@ -1469,7 +1469,7 @@ input {
   flex: 1;
   position: relative;
   background: #000;
-  min-height: 180px;
+  min-height: 140px;
 }
 
 .cam-feed video, .cam-feed img {
