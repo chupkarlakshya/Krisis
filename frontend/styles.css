@@ -1469,7 +1469,6 @@ input {
   flex: 1;
   position: relative;
   background: #000;
-  min-height: 140px;
 }
 
 .cam-feed video, .cam-feed img {
