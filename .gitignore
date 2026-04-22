@@ -1,0 +1,12 @@
+# Ignore local tools and logs
+tools/
+logs/
+*.log
+__pycache__/
+*.pyc
+.env
+.theia/
+.vscode/
+
+# Large demo videos (if they exceed 10MB)
+frontend/demo/stairscCamm.mp4
