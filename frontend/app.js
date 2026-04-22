@@ -13,7 +13,7 @@ const state = {
   selectedLocation: "Corridor A",
   selectedCameraId: "cam-04",
   selectedIncidentId: null,
-  currentScreen: "incident", // "incident" or "cctv"
+  currentScreen: "cctv", // "incident" or "cctv"
   cctvTimers: {},
   webcamStream: null,
 };
@@ -187,11 +187,32 @@ function updateRemoteQr() {
   if (img) img.src = qrUrl;
 }
 
+function playAlertBeep() {
+  try {
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880; 
+    gain.gain.setValueAtTime(0, context.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, context.currentTime + 0.05);
+    gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.3);
+    oscillator.start(context.currentTime);
+    oscillator.stop(context.currentTime + 0.3);
+  } catch (e) {
+    console.warn("Audio alert failed:", e);
+  }
+}
+
 function init() {
   updateRemoteQr();
   els.apiBase.value = state.apiBase;
   state.cameraRegistry = loadCameraRegistry();
   
+  // Start on CCTV by default
+  switchScreen("cctv");
   // Auto-select first camera if selectedCameraId is missing or deleted
   if (!state.cameraRegistry[state.selectedCameraId]) {
     const firstCam = Object.values(state.cameraRegistry)[0];
@@ -883,8 +904,23 @@ function syncMockNotifications(incident) {
   }));
 }
 
+let lastIncidentCount = 0;
+
 async function refreshAll() {
   await Promise.all([refreshIncidents(), refreshEvents(), refreshNotifications(), refreshDirectory()]);
+  
+  // Alert Logic: Glow sidebar if incidents exist while on CCTV
+  const activeCount = state.incidents.length;
+  if (activeCount > 0 && state.currentScreen === "cctv") {
+    els.showIncidentView.classList.add("glow-alert");
+    if (activeCount > lastIncidentCount) {
+      playAlertBeep();
+    }
+  } else {
+    els.showIncidentView.classList.remove("glow-alert");
+  }
+  lastIncidentCount = activeCount;
+
   renderAll();
 }
 
