@@ -27,7 +27,6 @@ Real-time escalation via **Twilio SMS and Voice**. When an incident is confirmed
 - **Vision**: YOLOv8 / OpenCV
 - **Communication**: Twilio SMS & Voice API
 - **UI**: Vanilla HTML5/CSS3/JS (Ultra-compact layout)
-- **Deployment**: Docker-ready for Hugging Face Spaces / Cloud
 
 ---
 
