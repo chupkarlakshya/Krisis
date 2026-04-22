@@ -181,10 +181,36 @@ function renderMap() {
 }
 
 function updateRemoteQr() {
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const sosUrl = new URL("./sos.html", window.location.href).href;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(sosUrl)}`;
+  
+  // Larger size for easier scanning
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(sosUrl)}&margin=10`;
+  
   const img = document.getElementById("remoteQr");
-  if (img) img.src = qrUrl;
+  const container = document.getElementById("remoteQrContainer");
+  
+  if (img) {
+    img.src = qrUrl;
+    img.onerror = () => {
+      img.style.display = 'none';
+      const fallback = document.createElement('div');
+      fallback.innerHTML = `<a href="${sosUrl}" target="_blank" style="font-size:10px; color:blue;">Open Remote Link</a>`;
+      container.appendChild(fallback);
+    };
+  }
+
+  // Add a helpful hint for local testing
+  if (isLocal && container) {
+    let hint = document.getElementById("qrLocalHint");
+    if (!hint) {
+      hint = document.createElement("p");
+      hint.id = "qrLocalHint";
+      hint.style = "color: #d32f2f; font-size: 8px; font-weight: 800; margin-top: 8px; border-top: 1px solid #eee; padding-top: 4px;";
+      hint.textContent = "NOTE: Use your Local IP (not localhost) to scan from phone.";
+      container.appendChild(hint);
+    }
+  }
 }
 
 function playAlertBeep() {
