@@ -117,13 +117,23 @@ const mockStore = {
 };
 
 function defaultCameraRegistry() {
+  const presets = {
+    "cam-01": { source: "0", location: "Lobby" },
+    "cam-02": { source: "demo/lobbycam.mp4", location: "Reception" },
+    "cam-03": { source: "demo/kitchencam.mp4", location: "Kitchen" },
+    "cam-04": { source: "demo/corridorCam.mp4", location: "Corridor A" },
+    "cam-05": { source: "demo/banquet hall.mp4", location: "Banquet Hall" },
+    "cam-06": { source: "demo/stairscCamm.mp4", location: "Stairwell" },
+  };
+
   return CAMERA_UNITS.reduce((acc, camera) => {
+    const preset = presets[camera.camera_id] || { source: "0", location: camera.location };
     acc[camera.camera_id] = {
       camera_id: camera.camera_id,
-      location: camera.location,
-      source: "0",
+      location: preset.location,
+      source: preset.source,
       model_path: "vision/models/best.pt",
-      confidence: 0.65,
+      confidence: 0.55,
       frame_stride: 12,
     };
     return acc;
