@@ -180,7 +180,15 @@ function renderMap() {
   }).join("");
 }
 
+function updateRemoteQr() {
+  const sosUrl = new URL("./sos.html", window.location.href).href;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(sosUrl)}`;
+  const img = document.getElementById("remoteQr");
+  if (img) img.src = qrUrl;
+}
+
 function init() {
+  updateRemoteQr();
   els.apiBase.value = state.apiBase;
   state.cameraRegistry = loadCameraRegistry();
   
