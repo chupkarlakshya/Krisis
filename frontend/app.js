@@ -13,6 +13,9 @@ const state = {
   selectedLocation: "Corridor A",
   selectedCameraId: "cam-04",
   selectedIncidentId: null,
+  currentScreen: "incident", // "incident" or "cctv"
+  cctvTimers: {},
+  webcamStream: null,
 };
 
 const CAMERA_UNITS = [
@@ -81,6 +84,22 @@ const els = {
   onboardingNext: document.getElementById("onboardingNext"),
   onboardingPrev: document.getElementById("onboardingPrev"),
   actionDemo: document.getElementById("actionDemo"),
+  
+  // Screen Toggles
+  showIncidentView: document.getElementById("showIncidentView"),
+  showCctvView: document.getElementById("showCctvView"),
+  incidentView: document.getElementById("incidentView"),
+  cctvView: document.getElementById("cctvView"),
+  sidebarRight: document.querySelector(".sidebar-right"),
+  
+  // CCTV Elements
+  cctvGrid: document.getElementById("cctvGrid"),
+  cctvBanner: document.getElementById("cctvBanner"),
+  cctvBannerText: document.getElementById("cctvBannerText"),
+  btnWebcam: document.getElementById("btnWebcam"),
+  btnVideos: document.getElementById("btnVideos"),
+  btnRefreshStatus: document.getElementById("btnRefresh"),
+  analyzeCanvas: document.getElementById("analyzeCanvas"),
 };
 
 let onboardingCurrentStep = 1;
@@ -283,7 +302,271 @@ function bindEvents() {
 
   on(els.openDirectoryMenu, "click", () => els.directoryDrawer.showModal());
   on(els.closeDirectoryMenu, "click", () => els.directoryDrawer.close());
+
+  on(els.showIncidentView, "click", () => switchScreen("incident"));
+  on(els.showCctvView, "click", () => switchScreen("cctv"));
+  
+  on(els.btnWebcam, "click", () => {
+    localStorage.setItem("ecg-camera-registry", JSON.stringify(defaultCameraRegistry()));
+    window.location.reload();
+  });
+  
+  on(els.btnVideos, "click", () => {
+    localStorage.removeItem("ecg-camera-registry");
+    window.location.reload();
+  });
+  
+  on(els.btnRefreshStatus, "click", refreshCctvStatus);
 }
+
+function switchScreen(screenName) {
+  state.currentScreen = screenName;
+  
+  if (screenName === "incident") {
+    els.incidentView.style.display = "grid";
+    els.cctvView.style.display = "none";
+    els.sidebarRight.style.display = "flex";
+    els.showIncidentView.classList.add("active");
+    els.showCctvView.classList.remove("active");
+    document.querySelector(".app-shell").classList.remove("cctv-mode");
+    // Stop CCTV timers if they exist
+    Object.values(state.cctvTimers).forEach(t => clearTimeout(t));
+    state.cctvTimers = {};
+  } else {
+    els.incidentView.style.display = "none";
+    els.cctvView.style.display = "block";
+    els.sidebarRight.style.display = "none";
+    els.showIncidentView.classList.remove("active");
+    els.showCctvView.classList.add("active");
+    document.querySelector(".app-shell").classList.add("cctv-mode");
+    
+    // Initialize CCTV
+    initCctv();
+  }
+}
+
+// --- CCTV Logic Integrated ---
+
+const ANALYSIS_INTERVAL = 2500;
+
+function initCctv() {
+  buildCctvGrid();
+  wireCctvFeeds();
+  refreshCctvStatus();
+}
+
+function buildCctvGrid() {
+  const cameras = Object.values(state.cameraRegistry).sort((a, b) => a.camera_id.localeCompare(b.camera_id));
+  els.cctvGrid.innerHTML = cameras.map(cam => `
+    <div class="cam" id="cam-${escapeHtml(cam.camera_id)}"
+         data-location="${escapeHtml(cam.location)}"
+         data-camera-id="${escapeHtml(cam.camera_id)}"
+         data-ai="0" data-sending="0">
+
+      <div class="cam-head">
+        <div>
+          <div class="cam-id">${escapeHtml(cam.camera_id)}</div>
+          <div class="cam-loc">${escapeHtml(cam.location)}</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn-clear" onclick="resolveIncident('${escapeHtml(cam.location)}')">✅ Clear</button>
+          <button class="btn-panic" onclick="triggerPanic('${escapeHtml(cam.camera_id)}', '${escapeHtml(cam.location)}')">🚨 PANIC</button>
+          <span class="cam-badge clear" id="badge-${escapeHtml(cam.camera_id)}">CLEAR</span>
+        </div>
+      </div>
+
+      <div class="cam-feed" id="feed-${escapeHtml(cam.camera_id)}">
+        <div class="cam-placeholder" id="ph-${escapeHtml(cam.camera_id)}">
+          <span>Connecting…</span>
+        </div>
+        <div class="cam-overlay"></div>
+        <div class="cam-alert-chip">⚠ Alert</div>
+        <div class="cam-alert-msg" id="msg-${escapeHtml(cam.camera_id)}"><span>FIRE DETECTED</span></div>
+        <div class="ai-pip">AI ON</div>
+        <div class="send-pip">Sending…</div>
+      </div>
+
+      <div class="cam-meta">
+        <span class="cam-meta-l">${escapeHtml(cam.source === "0" ? "Webcam" : cam.source)}</span>
+        <span class="cam-meta-r" id="signal-${escapeHtml(cam.camera_id)}">—</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function wireCctvFeeds() {
+  const cameras = Object.values(state.cameraRegistry).sort((a, b) => a.camera_id.localeCompare(b.camera_id));
+  const needsWebcam = cameras.some(c => c.source === "0");
+
+  if (needsWebcam && !state.webcamStream) {
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        state.webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (err) {
+        console.warn("[cctv] getUserMedia failed:", err.message);
+      }
+    }
+  }
+
+  cameras.forEach((cam, index) => {
+    const feedEl = document.getElementById(`feed-${cam.camera_id}`);
+    const phEl = document.getElementById(`ph-${cam.camera_id}`);
+    if (!feedEl) return;
+
+    let videoEl = document.createElement("video");
+    videoEl.autoplay = true;
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+
+    if (cam.source === "0") {
+      if (!state.webcamStream) {
+        if (phEl) phEl.querySelector("span").textContent = "Camera unavailable";
+        return;
+      }
+      videoEl.srcObject = state.webcamStream;
+    } else {
+      videoEl.loop = true;
+      const src = resolveVideoSrc(cam.source);
+      videoEl.src = src ?? "";
+      if (!src) {
+        if (phEl) phEl.querySelector("span").textContent = "Invalid source";
+        return;
+      }
+    }
+
+    videoEl.onloadeddata = () => phEl?.remove();
+    feedEl.insertBefore(videoEl, feedEl.firstChild);
+
+    const stagger = index * Math.floor(ANALYSIS_INTERVAL / cameras.length);
+    setTimeout(() => startCctvAnalysisLoop(cam, videoEl), stagger);
+  });
+}
+
+function resolveVideoSrc(source) {
+  if (!source || String(source).trim() === "0") return null;
+  const s = String(source).trim();
+  if (/^[a-zA-Z]:[/\\]/.test(s) || s.startsWith("/")) {
+    return `${state.apiBase.replace("/api", "/visionapi")}/media?path=${encodeURIComponent(s)}`;
+  }
+  return s; 
+}
+
+function startCctvAnalysisLoop(cam, videoEl) {
+  const ctx = els.analyzeCanvas.getContext("2d");
+  
+  async function tick() {
+    if (state.currentScreen !== "cctv") return;
+    
+    if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+      const cardEl = document.getElementById(`cam-${cam.camera_id}`);
+      if (cardEl) cardEl.dataset.sending = "1";
+
+      try {
+        ctx.drawImage(videoEl, 0, 0, els.analyzeCanvas.width, els.analyzeCanvas.height);
+        const blob = await new Promise(resolve => els.analyzeCanvas.toBlob(resolve, "image/jpeg", 0.75));
+
+        const visionUrl = `${state.apiBase.replace("/api", "/visionapi")}/analyze-frame`
+          + `?camera_id=${encodeURIComponent(cam.camera_id)}`
+          + `&location=${encodeURIComponent(cam.location)}`
+          + `&confidence=${cam.confidence ?? 0.45}`
+          + `&model_path=${encodeURIComponent(cam.model_path ?? "vision/models/best.pt")}`;
+
+        const resp = await fetch(visionUrl, {
+          method: "POST",
+          headers: { "Content-Type": "image/jpeg" },
+          body: blob,
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (cardEl) cardEl.dataset.ai = "1";
+
+          for (const det of (data.detections || [])) {
+            fetch(resolveApiUrl("/ingest/detection"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                camera_id: cam.camera_id,
+                location: cam.location,
+                label: det.label,
+                confidence: det.confidence,
+              }),
+            });
+          }
+        }
+      } catch (_) {
+        if (cardEl) cardEl.dataset.ai = "0";
+      } finally {
+        if (cardEl) cardEl.dataset.sending = "0";
+      }
+    }
+    state.cctvTimers[cam.camera_id] = setTimeout(tick, ANALYSIS_INTERVAL);
+  }
+  tick();
+}
+
+async function refreshCctvStatus() {
+  if (state.currentScreen !== "cctv") return;
+  
+  try {
+    const incidents = state.incidents;
+    const alertZones = new Set(
+      incidents
+        .filter(i => ["fire", "warning", "medical", "security"].includes(i.type))
+        .map(i => i.location)
+    );
+
+    if (!alertZones.size) {
+      els.cctvBanner.className = "status-banner";
+      els.cctvBannerText.textContent = "All zones clear — no active incidents.";
+    } else {
+      const top = incidents.find(i => alertZones.has(i.location));
+      els.cctvBanner.className = "status-banner alert";
+      els.cctvBannerText.textContent = `⚠ ALERT — ${[...alertZones].join(", ")}${top ? `: ${top.summary}` : ""}`;
+    }
+
+    Object.values(state.cameraRegistry).forEach(cam => {
+      const card = document.getElementById(`cam-${cam.camera_id}`);
+      const badge = document.getElementById(`badge-${cam.camera_id}`);
+      const signal = document.getElementById(`signal-${cam.camera_id}`);
+      if (!card) return;
+
+      const isAlert = alertZones.has(cam.location);
+      const incident = incidents.find(i => i.location === cam.location);
+      const msg = document.getElementById(`msg-${cam.camera_id}`);
+
+      card.classList.toggle("alert", isAlert);
+      badge.className = `cam-badge ${isAlert ? "caution" : "clear"}`;
+      
+      if (isAlert && incident) {
+        badge.textContent = incident.type.toUpperCase();
+        if (msg) msg.querySelector("span").textContent = `${incident.type.toUpperCase()} DETECTED`;
+      } else {
+        badge.textContent = "CLEAR";
+        if (msg) msg.querySelector("span").textContent = "";
+      }
+
+      if (signal) {
+        signal.textContent = incident ? `${incident.type} · ${incident.severity}` : "No signal";
+      }
+    });
+  } catch (err) {
+    console.error("CCTV status refresh failed:", err);
+  }
+}
+
+async function triggerPanic(camId, location) {
+  if (!confirm(`Trigger EMERGENCY protocol for ${location}?`)) return;
+  const payload = {
+    trigger_id: `manual-${Date.now()}`,
+    location: location,
+    trigger_type: "panic_button",
+    notes: `Manual panic trigger from CCTV Wall (Camera ${camId})`
+  };
+  await sendEvent("manual", payload);
+  refreshCctvStatus();
+}
+window.triggerPanic = triggerPanic;
 
 function toggleMode() {
   state.useMock = !state.useMock;
@@ -594,6 +877,9 @@ function renderAll() {
   renderNotifications();
   renderDirectory();
   renderMap();
+  if (state.currentScreen === "cctv") {
+    refreshCctvStatus();
+  }
 }
 
 async function refreshIncidents() {

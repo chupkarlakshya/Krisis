@@ -1,6 +1,27 @@
-from __future__ import annotations
-
+import os
+from pathlib import Path
 from flask import Flask, jsonify, request
+
+# Load environment variables from .env if present
+def _load_env():
+    root_dir = Path(__file__).resolve().parent.parent
+    env_path = root_dir / ".env"
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    # Clean up key and value (strip spaces and quotes)
+                    k = k.strip()
+                    v = v.strip().strip("'").strip('"')
+                    os.environ[k] = v
+                    if "TWILIO" in k:
+                        print(f"[config] Loaded {k}")
+
+_load_env()
 
 from app.engine import IncidentEngine
 from app.models import DetectionEvent, ManualEvent, SensorEvent, StaffContact

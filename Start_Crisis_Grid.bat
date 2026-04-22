@@ -1,6 +1,6 @@
 @echo off
-title Crisis Grid Loader
-echo Starting Embedded Crisis Grid Stack...
+title Krisis Loader
+echo Starting Krisis Stack...
 echo.
 
 :: Change to the directory where the batch file is located

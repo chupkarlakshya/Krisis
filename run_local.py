@@ -92,9 +92,9 @@ def stop_service(process: subprocess.Popen[str]) -> None:
 
 
 def main() -> int:
-    print("Starting Embedded Crisis Grid local stack...")
-    print(f"Workspace: {ROOT}")
-    print()
+    print("==========================================================")
+    print("    KRISIS - COMMAND CENTER INITIALIZATION")
+    print("==========================================================")
 
     processes: list[tuple[dict[str, object], subprocess.Popen[str]]] = []
 
