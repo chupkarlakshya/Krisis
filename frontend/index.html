@@ -313,11 +313,10 @@
         </div>
       </div>
 
-      <div id="cctvView" style="display:none">
-        <div class="panel-head" style="margin-bottom: 12px;">
+      <div id="cctvView" style="display:none; height: 100%; display: flex; flex-direction: column;">
+        <div class="panel-head" style="margin-bottom: 8px; padding-top: 0;">
           <div>
-            <p class="section-kicker">Live Monitoring</p>
-            <h2>CCTV Security Wall</h2>
+            <h2 style="font-size: 1.2rem; margin: 0;">CCTV Security Wall</h2>
           </div>
           <div class="panel-actions">
             <button class="button subtle" id="btnWebcam">📷 Use Webcam</button>
@@ -326,8 +325,8 @@
           </div>
         </div>
 
-        <div id="cctvBanner" class="status-banner" style="margin-bottom: 16px; padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); font-size: 13px; font-weight: 600;">
-          <span id="cctvBannerText">Initializing CCTV monitoring...</span>
+        <div id="cctvBanner" class="status-banner" style="margin-bottom: 8px; padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); font-size: 11px; font-weight: 600;">
+          <span id="cctvBannerText">Initializing...</span>
         </div>
 
         <section id="cctvGrid" class="cctv-grid"></section>
