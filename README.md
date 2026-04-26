@@ -76,4 +76,4 @@ TWILIO_PHONE_NUMBER=your_number
 - `tools/`: Local development gateway and developer utilities.
 
 ---
-**Developed for the 2026 Crisis Management Hackathon.**
+**Developed for the 2026 Solution Challenge.**
