@@ -23,6 +23,9 @@ def _load_env():
 
 _load_env()
 
+from app.database import init_db
+init_db()
+
 from app.engine import IncidentEngine
 from app.models import DetectionEvent, ManualEvent, SensorEvent, StaffContact
 

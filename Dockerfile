@@ -1,38 +1,39 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Install system dependencies for OpenCV and Nginx
+# Install system dependencies required for OpenCV and Nginx
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
     nginx \
-    curl \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Hugging Face Spaces run as user 1000
+RUN useradd -m -u 1000 user
+
+# Set up working directory
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt .
-COPY requirements-vision.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -r requirements-vision.txt
+# Ensure permissions for Nginx to run as non-root user
+RUN mkdir -p /var/lib/nginx /var/log/nginx && \
+    chown -R user:user /var/lib/nginx /var/log/nginx /etc/nginx && \
+    touch /run/nginx.pid && \
+    chown -R user:user /run/nginx.pid
 
-# Copy the rest of the application
-COPY . .
+# Switch to the non-root user
+USER user
 
-# Setup Nginx configuration
-COPY tools/nginx.conf /etc/nginx/sites-available/default
+# Install Python requirements
+COPY --chown=user:user requirements.txt requirements-vision.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-vision.txt
 
-# Create an entrypoint script
-RUN echo '#!/bin/bash\n\
-service nginx start\n\
-python -m vision.service & \n\
-python run_local.py --no-browser --port 8080' > /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Copy application files
+COPY --chown=user:user . .
 
-# Hugging Face Spaces usually runs on port 7860
-# But our internal gateway is on 8080. We will map them in the entrypoint if needed.
-# For HF, we usually just need to serve the UI on port 7860.
+# Expose Hugging Face spaces default port
 EXPOSE 7860
 
-# Start the services
-CMD ["/app/entrypoint.sh"]
+# Ensure the start script is executable
+RUN chmod +x start.sh
+
+# Run the unified start script
+CMD ["./start.sh"]

@@ -84,14 +84,14 @@ const els = {
   onboardingNext: document.getElementById("onboardingNext"),
   onboardingPrev: document.getElementById("onboardingPrev"),
   actionDemo: document.getElementById("actionDemo"),
-  
+
   // Screen Toggles
   showIncidentView: document.getElementById("showIncidentView"),
   showCctvView: document.getElementById("showCctvView"),
   incidentView: document.getElementById("incidentView"),
   cctvView: document.getElementById("cctvView"),
   sidebarRight: document.querySelector(".sidebar-right"),
-  
+
   // CCTV Elements
   cctvGrid: document.getElementById("cctvGrid"),
   cctvBanner: document.getElementById("cctvBanner"),
@@ -115,19 +115,22 @@ const mockStore = {
     { name: "Nidhi Rao", role: "Duty Manager", zone: "All Zones", phone: "+918889800445", channels: ["sms", "voice", "dashboard"], escalation_level: 3 },
   ],
 };
+const REGISTRY_VERSION = "2";
 
 function defaultCameraRegistry() {
+  // NOTE: paths are relative to /app/frontend (nginx root). The nginx config
+  // exposes /demo/ -> /app/frontend/demo/, so sources MUST start with "demo/".
   const presets = {
-    "cam-01": { source: "0", location: "Lobby" },
-    "cam-02": { source: "demo/lobbycam.mp4", location: "Reception" },
+    "cam-01": { source: "demo/lobbycam.mp4", location: "Lobby" },
+    "cam-02": { source: "0", location: "Reception" },
     "cam-03": { source: "demo/kitchencam.mp4", location: "Kitchen" },
     "cam-04": { source: "demo/corridorCam.mp4", location: "Corridor A" },
-    "cam-05": { source: "demo/banquet hall.mp4", location: "Banquet Hall" },
+    "cam-05": { source: "demo/banquet%20hall.mp4", location: "Banquet Hall" },
     "cam-06": { source: "demo/stairscCamm.mp4", location: "Stairwell" },
   };
-
   return CAMERA_UNITS.reduce((acc, camera) => {
     const preset = presets[camera.camera_id] || { source: "0", location: camera.location };
+    console.log(`[registry] Registering ${camera.camera_id} at ${preset.location} with source: ${preset.source}`);
     acc[camera.camera_id] = {
       camera_id: camera.camera_id,
       location: preset.location,
@@ -139,9 +142,19 @@ function defaultCameraRegistry() {
     return acc;
   }, {});
 }
-
 function loadCameraRegistry() {
   try {
+    // Cache-bust: if stored registry was created by an older build,
+    // wipe it and rebuild from the current defaults. Auto-fixes returning
+    // users who would otherwise be stuck on the broken "frontend/demo/..."
+    // paths cached in their browser.
+    const storedVersion = localStorage.getItem("ecg-registry-version");
+    if (storedVersion !== REGISTRY_VERSION) {
+      localStorage.removeItem("ecg-camera-registry");
+      localStorage.setItem("ecg-registry-version", REGISTRY_VERSION);
+      return defaultCameraRegistry();
+    }
+
     const raw = localStorage.getItem("ecg-camera-registry");
     if (!raw) return defaultCameraRegistry();
     const parsed = JSON.parse(raw);
@@ -164,7 +177,7 @@ function renderMap() {
   els.mapZonesContainer.innerHTML = zones.map(zoneName => {
     const isActive = state.incidents.some(i => i.location === zoneName);
     const staffInZone = state.directory.filter(s => s.current_zone === zoneName);
-    
+
     return `
       <div class="map-zone ${isActive ? 'active-alert' : ''}">
         <div class="zone-label">${escapeHtml(zoneName)}</div>
@@ -183,13 +196,13 @@ function renderMap() {
 function updateRemoteQr() {
   const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const sosUrl = new URL("./sos.html", window.location.href).href;
-  
+
   // Larger size for easier scanning
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(sosUrl)}&margin=10`;
-  
+
   const img = document.getElementById("remoteQr");
   const container = document.getElementById("remoteQrContainer");
-  
+
   if (img) {
     img.src = qrUrl;
     img.onerror = () => {
@@ -213,6 +226,16 @@ function updateRemoteQr() {
   }
 }
 
+function safeSetClass(el, className, action = 'add') {
+  if (el && el.classList) {
+    el.classList[action](className);
+  }
+}
+
+function safeSetValue(el, val) {
+  if (el) el.value = val;
+}
+
 function playAlertBeep() {
   try {
     const context = new (window.AudioContext || window.webkitAudioContext)();
@@ -221,7 +244,7 @@ function playAlertBeep() {
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.type = "sine";
-    oscillator.frequency.value = 880; 
+    oscillator.frequency.value = 880;
     gain.gain.setValueAtTime(0, context.currentTime);
     gain.gain.linearRampToValueAtTime(0.2, context.currentTime + 0.05);
     gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.3);
@@ -233,30 +256,35 @@ function playAlertBeep() {
 }
 
 function init() {
+  console.log("[init] Initializing Command Center...");
   updateRemoteQr();
-  els.apiBase.value = state.apiBase;
+  safeSetValue(els.apiBase, state.apiBase);
   state.cameraRegistry = loadCameraRegistry();
-  
+
   // Start on CCTV by default
   switchScreen("cctv");
+
   // Auto-select first camera if selectedCameraId is missing or deleted
-  if (!state.cameraRegistry[state.selectedCameraId]) {
+  if (state.cameraRegistry && !state.cameraRegistry[state.selectedCameraId]) {
     const firstCam = Object.values(state.cameraRegistry)[0];
     if (firstCam) {
-        state.selectedCameraId = firstCam.camera_id;
-        state.selectedLocation = firstCam.location;
+      state.selectedCameraId = firstCam.camera_id;
+      state.selectedLocation = firstCam.location;
     }
   }
-  
+
   syncModeUi();
   renderDynamicUI();
   bindEvents();
-  if (Object.keys(state.cameraRegistry).length > 0) {
+
+  if (state.cameraRegistry && Object.keys(state.cameraRegistry).length > 0) {
     selectCamera(state.selectedCameraId);
     selectLocation(state.selectedLocation);
   }
+
   refreshAll();
   refreshVisionHealth();
+
   setInterval(() => {
     if (!state.useMock) {
       refreshAll();
@@ -265,7 +293,8 @@ function init() {
 
   // Trigger onboarding if first time
   if (!localStorage.getItem("ecg_setup_complete")) {
-    els.onboardingOverlay.classList.add("active");
+    console.log("[init] First time user, showing onboarding...");
+    safeSetClass(els.onboardingOverlay, "active", "add");
     updateOnboardingUI();
   }
 }
@@ -278,7 +307,7 @@ function logout() {
 function moveOnboarding(delta) {
   const nextStep = onboardingCurrentStep + delta;
   if (nextStep < 1) return;
-  
+
   if (nextStep > 3) {
     els.onboardingOverlay.classList.remove("active");
     localStorage.setItem("ecg_setup_complete", "true");
@@ -298,20 +327,24 @@ function updateOnboardingUI() {
 
   const currentSlide = document.querySelector(`.onboarding-slide[data-step="${onboardingCurrentStep}"]`);
   const currentDot = document.querySelector(`.step-dot[data-step="${onboardingCurrentStep}"]`);
-  
+
   if (currentSlide) currentSlide.classList.add("active");
   if (currentDot) currentDot.classList.add("active");
 
-  els.onboardingPrev.style.visibility = onboardingCurrentStep === 1 ? "hidden" : "visible";
-  els.onboardingNext.textContent = onboardingCurrentStep === 3 ? "Get Started" : "Next Step";
+  if (els.onboardingPrev) {
+    els.onboardingPrev.style.visibility = onboardingCurrentStep === 1 ? "hidden" : "visible";
+  }
+  if (els.onboardingNext) {
+    els.onboardingNext.textContent = onboardingCurrentStep === 3 ? "Get Started" : "Next Step";
+  }
 }
 
 function renderDynamicUI() {
   const cameras = Object.values(state.cameraRegistry).sort((a, b) => a.camera_id.localeCompare(b.camera_id));
-  
+
   // Render Select Options
   if (els.cameraSelect) {
-    els.cameraSelect.innerHTML = cameras.map(cam => 
+    els.cameraSelect.innerHTML = cameras.map(cam =>
       `<option value="${cam.camera_id}">${cam.camera_id} · ${escapeHtml(cam.location)}</option>`
     ).join("");
   }
@@ -355,10 +388,10 @@ function bindEvents() {
 
   on(els.onboardingNext, "click", () => moveOnboarding(1));
   on(els.onboardingPrev, "click", () => moveOnboarding(-1));
-  
+
   on(els.addCamera, "click", addCamera);
   on(els.deleteCamera, "click", deleteCamera);
-  
+
   on(els.openSystemMenu, "click", () => els.systemDrawer.showModal());
   on(els.closeSystemMenu, "click", () => els.systemDrawer.close());
 
@@ -370,23 +403,46 @@ function bindEvents() {
 
   on(els.showIncidentView, "click", () => switchScreen("incident"));
   on(els.showCctvView, "click", () => switchScreen("cctv"));
-  
+
   on(els.btnWebcam, "click", () => {
     localStorage.setItem("ecg-camera-registry", JSON.stringify(defaultCameraRegistry()));
     window.location.reload();
   });
-  
+
   on(els.btnVideos, "click", () => {
     localStorage.removeItem("ecg-camera-registry");
+    const presets = {
+      "cam-01": { source: "demo/lobbycam.mp4", location: "Lobby" },
+      "cam-02": { source: "0", location: "Reception" },
+      "cam-03": { source: "demo/kitchencam.mp4", location: "Kitchen" },
+      "cam-04": { source: "demo/corridorCam.mp4", location: "Corridor A" },
+      "cam-05": { source: "demo/banquet%20hall.mp4", location: "Banquet Hall" },
+      "cam-06": { source: "demo/stairscCamm.mp4", location: "Stairwell" },
+    };
+
+    const newRegistry = CAMERA_UNITS.reduce((acc, camera) => {
+      const preset = presets[camera.camera_id] || { source: "0", location: camera.location };
+      acc[camera.camera_id] = {
+        camera_id: camera.camera_id,
+        location: preset.location,
+        source: preset.source,
+        model_path: "vision/models/best.pt",
+        confidence: 0.55,
+        frame_stride: 12,
+      };
+      return acc;
+    }, {});
+
+    localStorage.setItem("ecg-camera-registry", JSON.stringify(newRegistry));
     window.location.reload();
   });
-  
+
   on(els.btnRefreshStatus, "click", refreshCctvStatus);
 }
 
 function switchScreen(screenName) {
   state.currentScreen = screenName;
-  
+
   if (screenName === "incident") {
     els.incidentView.style.display = "grid";
     els.cctvView.style.display = "none";
@@ -404,7 +460,7 @@ function switchScreen(screenName) {
     els.showIncidentView.classList.remove("active");
     els.showCctvView.classList.add("active");
     document.querySelector(".app-shell").classList.add("cctv-mode");
-    
+
     // Initialize CCTV
     initCctv();
   }
@@ -444,6 +500,7 @@ function buildCctvGrid() {
         <div class="cam-placeholder" id="ph-${escapeHtml(cam.camera_id)}">
           <span>Connecting…</span>
         </div>
+        <!-- Video elements added by wireCctvFeeds -->
         <div class="cam-overlay"></div>
         <div class="cam-alert-chip">⚠ Alert</div>
         <div class="cam-alert-msg" id="msg-${escapeHtml(cam.camera_id)}"><span>FIRE DETECTED</span></div>
@@ -452,7 +509,7 @@ function buildCctvGrid() {
       </div>
 
       <div class="cam-meta">
-        <span class="cam-meta-l">${escapeHtml(cam.source === "0" ? "Webcam" : cam.source)}</span>
+        <span class="cam-meta-l" title="${escapeHtml(cam.source)}">${escapeHtml(cam.source === "0" ? "Webcam" : cam.source.split('/').pop())}</span>
         <span class="cam-meta-r" id="signal-${escapeHtml(cam.camera_id)}">—</span>
       </div>
     </div>
@@ -491,8 +548,28 @@ async function wireCctvFeeds() {
       videoEl.srcObject = state.webcamStream;
     } else {
       videoEl.loop = true;
-      const src = resolveVideoSrc(cam.source);
+      videoEl.crossOrigin = "anonymous";
+      let src = resolveVideoSrc(cam.source);
+      // Normalise relative MP4 paths so the browser resolves them from the
+      // site root (e.g. "demo/foo.mp4" -> "./demo/foo.mp4"). Absolute URLs
+      // (http://, https://, /...) and the /visionapi/media?... proxy URLs
+      // are left untouched.
+      if (src && src.toLowerCase().endsWith(".mp4")) {
+        const isAbsolute = /^(https?:)?\/\//i.test(src) || src.startsWith("/");
+        if (!isAbsolute && !src.startsWith("./")) {
+          src = "./" + src;
+        }
+        console.log(`[cctv] Resolved video path for ${cam.camera_id}: ${src}`);
+      }
+
+      console.log(`[cctv] Loading video for ${cam.camera_id}: ${src}`);
       videoEl.src = src ?? "";
+
+      videoEl.onerror = (e) => {
+        console.error(`[cctv] FAILED to load video for ${cam.camera_id}:`, e);
+        if (phEl) phEl.querySelector("span").textContent = "Video Load Failed";
+      };
+
       if (!src) {
         if (phEl) phEl.querySelector("span").textContent = "Invalid source";
         return;
@@ -513,15 +590,15 @@ function resolveVideoSrc(source) {
   if (/^[a-zA-Z]:[/\\]/.test(s) || s.startsWith("/")) {
     return `${state.apiBase.replace("/api", "/visionapi")}/media?path=${encodeURIComponent(s)}`;
   }
-  return s; 
+  return s;
 }
 
 function startCctvAnalysisLoop(cam, videoEl) {
   const ctx = els.analyzeCanvas.getContext("2d");
-  
+
   async function tick() {
     if (state.currentScreen !== "cctv") return;
-    
+
     if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
       const cardEl = document.getElementById(`cam-${cam.camera_id}`);
       if (cardEl) cardEl.dataset.sending = "1";
@@ -572,7 +649,7 @@ function startCctvAnalysisLoop(cam, videoEl) {
 
 async function refreshCctvStatus() {
   if (state.currentScreen !== "cctv") return;
-  
+
   try {
     const incidents = state.incidents;
     const alertZones = new Set(
@@ -602,7 +679,7 @@ async function refreshCctvStatus() {
 
       card.classList.toggle("alert", isAlert);
       badge.className = `cam-badge ${isAlert ? "caution" : "clear"}`;
-      
+
       if (isAlert && incident) {
         badge.textContent = incident.type.toUpperCase();
         if (msg) msg.querySelector("span").textContent = `${incident.type.toUpperCase()} DETECTED`;
@@ -659,7 +736,7 @@ function setStatus(message, tone) {
 function selectLocation(location) {
   state.selectedLocation = location;
   if (els.mapHint) els.mapHint.textContent = `Selected zone: ${location}`;
-  
+
   const cameras = Object.values(state.cameraRegistry);
   const matchingCamera = cameras.find((camera) => camera.location === location);
   if (matchingCamera && matchingCamera.camera_id !== state.selectedCameraId) {
@@ -736,17 +813,17 @@ function saveSourcePreset() {
 function addCamera() {
   const locName = prompt("Enter the zone/location name for the new camera (e.g., 'Pool'):");
   if (!locName || !locName.trim()) return;
-  
+
   // Generate next available cam-XX id
   let maxId = 0;
   Object.keys(state.cameraRegistry).forEach(id => {
-      const match = id.match(/cam-(\d+)/);
-      if (match) {
-          maxId = Math.max(maxId, parseInt(match[1]));
-      }
+    const match = id.match(/cam-(\d+)/);
+    if (match) {
+      maxId = Math.max(maxId, parseInt(match[1]));
+    }
   });
   const nextId = `cam-${String(maxId + 1).padStart(2, '0')}`;
-  
+
   state.cameraRegistry[nextId] = {
     camera_id: nextId,
     location: locName.trim(),
@@ -755,7 +832,7 @@ function addCamera() {
     confidence: 0.65,
     frame_stride: 12,
   };
-  
+
   saveCameraRegistry();
   renderDynamicUI();
   selectCamera(nextId);
@@ -767,17 +844,17 @@ function deleteCamera() {
     alert("You cannot delete the last remaining camera unit.");
     return;
   }
-  
+
   const toDelete = state.selectedCameraId;
   if (!confirm(`Are you sure you want to delete ${toDelete}?`)) return;
-  
+
   delete state.cameraRegistry[toDelete];
   saveCameraRegistry();
-  
+
   const firstCam = Object.values(state.cameraRegistry)[0];
   state.selectedCameraId = firstCam.camera_id;
   state.selectedLocation = firstCam.location;
-  
+
   renderDynamicUI();
   selectCamera(firstCam.camera_id);
   setStatus(`Deleted camera unit ${toDelete}`, "neutral");
@@ -934,7 +1011,7 @@ let lastIncidentCount = 0;
 
 async function refreshAll() {
   await Promise.all([refreshIncidents(), refreshEvents(), refreshNotifications(), refreshDirectory()]);
-  
+
   // Alert Logic: Glow sidebar if incidents exist while on CCTV
   const activeCount = state.incidents.length;
   if (activeCount > 0 && state.currentScreen === "cctv") {
@@ -1050,7 +1127,7 @@ function renderOverview() {
 
 async function resolveIncident(location) {
   if (!confirm(`Are you sure you want to resolve the incident at ${location}?`)) return;
-  
+
   try {
     const res = await fetch(`${resolveApiUrl("/incidents")}/${encodeURIComponent(location)}/resolve`, {
       method: "POST"
@@ -1138,7 +1215,7 @@ function renderCommandFocus() {
           </ul>
           <div class="incident-actions">
             <div class="dispatch-actions">
-              ${(incident.type === 'medical' ? [{label: "💉 First Aid", msg: "Bring First Aid Kit to location and assess patient."}, {label: "🚑 Call 911", msg: "Condition critical. Call 911 immediately."}] : incident.type === 'fire' ? [{label: "🏃 Evacuate", msg: "Evacuate zone immediately. Guide guests to assembly point."}, {label: "🧯 Extinguish", msg: "Use nearest fire extinguisher if safe. Isolate power."}] : [{label: "🔒 Lock Down", msg: "Secure all exits and isolate area. Do not confront."}, {label: "👮 Police", msg: "Call local law enforcement for backup."}]).map(t => `<button class="dispatch-btn ${incident.type}-action" onclick="event.stopPropagation(); sendQuickAction('${escapeHtml(incident.location)}', '${escapeHtml(t.msg)}')">${t.label}</button>`).join('')}
+              ${(incident.type === 'medical' ? [{ label: "💉 First Aid", msg: "Bring First Aid Kit to location and assess patient." }, { label: "🚑 Call 911", msg: "Condition critical. Call 911 immediately." }] : incident.type === 'fire' ? [{ label: "🏃 Evacuate", msg: "Evacuate zone immediately. Guide guests to assembly point." }, { label: "🧯 Extinguish", msg: "Use nearest fire extinguisher if safe. Isolate power." }] : [{ label: "🔒 Lock Down", msg: "Secure all exits and isolate area. Do not confront." }, { label: "👮 Police", msg: "Call local law enforcement for backup." }]).map(t => `<button class="dispatch-btn ${incident.type}-action" onclick="event.stopPropagation(); sendQuickAction('${escapeHtml(incident.location)}', '${escapeHtml(t.msg)}')">${t.label}</button>`).join('')}
             </div>
             <button class="btn-resolve" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(incident.incident_id)}')">
               <span>✅</span> Verify & Resolve Incident
@@ -1177,7 +1254,7 @@ function renderEvents() {
 
 function renderNotifications() {
   els.notificationList.className = "card-list";
-  
+
   if (!state.selectedIncidentId) {
     els.notificationList.innerHTML = `
       <div class="empty-state" style="text-align: center; padding: 40px 20px;">
@@ -1190,14 +1267,14 @@ function renderNotifications() {
 
   const selected = state.incidents.find(i => i.incident_id === state.selectedIncidentId);
   const notifications = state.notifications.filter(n => n.incident_id === state.selectedIncidentId);
-  
+
   if (!notifications.length) {
     els.notificationList.innerHTML = `<p class="empty-state">No notification routing active for this incident yet.</p>`;
     return;
   }
 
   const phoneNumbers = notifications.map(n => n.recipient.phone);
-  
+
   els.notificationList.innerHTML = `
     <div style="margin-bottom: 12px; padding: 10px 16px; background: var(--accent-strong); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(187, 62, 3, 0.3);">
       <div style="display: flex; flex-direction: column;">
@@ -1210,8 +1287,8 @@ function renderNotifications() {
     </div>
     <div style="margin-bottom: 12px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding-left: 4px;">Responder Log</div>
     ${notifications.map((notification) => {
-      const isNew = !notification.acknowledged_at && (new Date() - new Date(notification.created_at) < 60000);
-      return `
+    const isNew = !notification.acknowledged_at && (new Date() - new Date(notification.created_at) < 60000);
+    return `
         <article class="notification-card minimized ${isNew ? 'new-alert' : ''}" style="margin-bottom: 4px; padding: 10px 12px; background: #fff; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <div style="flex: 1;">
@@ -1228,14 +1305,14 @@ function renderNotifications() {
           </div>
         </article>
       `;
-    }).join("")}
+  }).join("")}
   `;
 }
 
 
 function renderDirectory() {
   if (!state.directory) state.directory = [];
-  
+
   els.directoryList.className = "directory-table-container";
   els.directoryList.innerHTML = `
     <table class="directory-table">
@@ -1314,7 +1391,7 @@ async function saveDirectory() {
     setStatus("Directory saved to mock store.", "good");
     return;
   }
-  
+
   try {
     const response = await fetch(resolveApiUrl("/directory"), {
       method: "POST",
@@ -1480,7 +1557,7 @@ async function configureVision() {
 async function startVision() {
   try {
     await configureVision();
-    const response = await fetch("/visionapi/start", { 
+    const response = await fetch("/visionapi/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ camera_id: state.selectedCameraId })
@@ -1532,7 +1609,7 @@ async function startAllVision() {
 
 async function stopVision() {
   try {
-    const response = await fetch("/visionapi/stop", { 
+    const response = await fetch("/visionapi/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ camera_id: state.selectedCameraId })
@@ -1548,7 +1625,7 @@ async function stopVision() {
 async function detectVisionOnce() {
   try {
     await configureVision();
-    const response = await fetch("/visionapi/detect-once", { 
+    const response = await fetch("/visionapi/detect-once", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ camera_id: state.selectedCameraId })
@@ -1620,7 +1697,7 @@ async function sendRealSMS(phone, message) {
   if (!target.startsWith("+")) {
     target = "+91" + target;
   }
-  
+
   try {
     const response = await fetch(`${state.apiBase}/sms/real`, {
       method: "POST",

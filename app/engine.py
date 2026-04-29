@@ -10,17 +10,75 @@ import time
 import urllib.request
 
 from app.models import DetectionEvent, EventEnvelope, Incident, ManualEvent, Notification, SensorEvent, StaffContact
+from app.database import (
+    load_incidents, save_incident, delete_incident, delete_incident_by_id,
+    load_notifications, save_notification, save_event, load_staff, save_staff
+)
 
 
 class IncidentEngine:
     def __init__(self) -> None:
         self.events: deque[EventEnvelope] = deque(maxlen=500)
-        self.active_incidents: dict[str, Incident] = {}
+        # Instead of storing in memory dicts, we load from DB
         self.location_windows: dict[str, deque[EventEnvelope]] = defaultdict(lambda: deque(maxlen=100))
-        self.staff_directory = self._build_staff_directory()
+        
+        # Load Staff Directory (Initialize if empty)
+        loaded_staff = load_staff()
+        if not loaded_staff:
+            self.staff_directory = self._build_staff_directory()
+            save_staff([s.to_dict() for s in self.staff_directory])
+        else:
+            self.staff_directory = [StaffContact.from_dict(d) for d in loaded_staff]
+            
         self._init_staff_positions()
+        
+        # Load active incidents from database
+        incident_dicts = load_incidents()
+        self.active_incidents: dict[str, Incident] = {}
+        for k, d in incident_dicts.items():
+            # Incident model reconstructs from dict. We bypass init for simplicity:
+            inc = Incident(
+                incident_id=d["incident_id"],
+                type=d["type"],
+                severity=d["severity"],
+                location=d["location"],
+                summary=d["summary"],
+                recommended_action=d["recommended_action"],
+                first_seen=datetime.fromisoformat(d["first_seen"]),
+                last_updated=datetime.fromisoformat(d["last_updated"]),
+                evidence=d.get("evidence", []),
+                status=d.get("status", "active"),
+                source=d.get("source", "ai")
+            )
+            self.active_incidents[k] = inc
+
+        # Load notifications
         self.notifications: deque[Notification] = deque(maxlen=300)
         self.notifications_by_incident: dict[str, list[str]] = defaultdict(list)
+        for n_dict in load_notifications():
+            # Reconstruct notification
+            recipient_dict = n_dict["recipient"]
+            if isinstance(recipient_dict, str):
+                import json
+                recipient_dict = json.loads(recipient_dict)
+            
+            n = Notification(
+                notification_id=n_dict["notification_id"],
+                incident_id=n_dict["incident_id"],
+                location=n_dict["location"],
+                incident_type=n_dict["incident_type"],
+                severity=n_dict["severity"],
+                recipient=StaffContact.from_dict(recipient_dict),
+                channel=n_dict["channel"],
+                message=n_dict["message"],
+                status=n_dict["status"],
+                created_at=datetime.fromisoformat(n_dict["created_at"]),
+                updated_at=datetime.fromisoformat(n_dict["updated_at"]),
+                acknowledged_at=datetime.fromisoformat(n_dict["acknowledged_at"]) if n_dict.get("acknowledged_at") else None,
+                reason=n_dict.get("reason")
+            )
+            self.notifications.append(n)
+            self.notifications_by_incident[n.incident_id].append(n.notification_id)
         self.persistence_window = timedelta(seconds=15)
         self.min_fire_hits = 1
         self.min_smoke_hits = 1
@@ -177,6 +235,7 @@ class IncidentEngine:
         if identifier in self.active_incidents:
             print(f"[engine] Resolving incident by key: {identifier}")
             del self.active_incidents[identifier]
+            delete_incident(identifier)
             return True
             
         # 2. Try to resolve by incident_id (Short UUID)
@@ -184,6 +243,7 @@ class IncidentEngine:
             if incident.incident_id == identifier:
                 print(f"[engine] Resolving incident by ID: {identifier}")
                 del self.active_incidents[key]
+                delete_incident(key)
                 # Also clear the window if the key matches the location
                 if key in self.location_windows:
                     self.location_windows[key].clear()
@@ -194,6 +254,7 @@ class IncidentEngine:
             if incident.location == identifier:
                 print(f"[engine] Resolving incident at location fallback: {identifier}")
                 del self.active_incidents[key]
+                delete_incident(key)
                 if identifier in self.location_windows:
                     self.location_windows[identifier].clear()
                 return True
@@ -229,11 +290,13 @@ class IncidentEngine:
                 acknowledged_at=now,
             )
             self.notifications[index] = updated
+            save_notification(updated.to_dict())
             return updated
         raise KeyError(notification_id)
 
     def _push(self, location: str, envelope: EventEnvelope) -> None:
         self.events.append(envelope)
+        save_event(location, envelope.to_dict())
         window = self.location_windows[location]
         window.append(envelope)
         self._trim_window(window)
@@ -343,17 +406,8 @@ class IncidentEngine:
         existing = self.active_incidents.get(lookup_key)
         now = self._now()
         if existing:
-            # Smart Prefix Merge: Replace tags with the same category prefix (e.g., "fire_hits:")
-            # to prevent evidence list bloat while keeping unique tags.
-            evidence_map = {}
-            for tag in existing.evidence + evidence:
-                if ":" in tag:
-                    prefix = tag.split(":", 1)[0]
-                    evidence_map[prefix] = tag
-                else:
-                    evidence_map[tag] = tag
-            merged_evidence = list(evidence_map.values())
-
+            # Merge evidence instead of replacing it
+            merged_evidence = list(set(existing.evidence + evidence))
             updated = existing.with_updates(
                 type=incident_type,
                 severity=severity,
@@ -364,6 +418,7 @@ class IncidentEngine:
                 source=source,
             )
             self.active_incidents[lookup_key] = updated
+            save_incident(lookup_key, updated.to_dict())
             self._sync_notifications(updated)
             return updated
 
@@ -380,6 +435,7 @@ class IncidentEngine:
             source=source,
         )
         self.active_incidents[lookup_key] = incident
+        save_incident(lookup_key, incident.to_dict())
         self._sync_notifications(incident)
         return incident
 
@@ -414,6 +470,7 @@ class IncidentEngine:
             )
             self.notifications.append(notification)
             self.notifications_by_incident[incident.incident_id].append(notification_id)
+            save_notification(notification.to_dict())
             self._dispatch_webhook(notification)
 
     def _update_notification(self, notification_id: str, incident: Incident, message: str, reason: str) -> None:
@@ -437,6 +494,7 @@ class IncidentEngine:
                 reason=reason,
             )
             self.notifications[index] = updated_notification
+            save_notification(updated_notification.to_dict())
             
             if upgraded:
                 self._dispatch_webhook(updated_notification)

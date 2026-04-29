@@ -1,3 +1,10 @@
+---
+title: Krisis Command Center
+emoji: 🚨
+colorFrom: red
+colorTo: gray
+sdk: docker
+---
 # KRISIS | Command Grid
 **Software-first emergency coordination for hospitality and high-traffic environments.**
 
@@ -76,4 +83,4 @@ TWILIO_PHONE_NUMBER=your_number
 - `tools/`: Local development gateway and developer utilities.
 
 ---
-**Developed for the 2026 Solution Challenge.**
+**Developed for the 2026 Crisis Management Hackathon.**
