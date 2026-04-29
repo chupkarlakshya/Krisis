@@ -1,9 +1,5 @@
 ---
-title: Krisis Command Center
-emoji: 🚨
-colorFrom: red
-colorTo: gray
-sdk: docker
+
 ---
 # KRISIS | Command Grid
 **Software-first emergency coordination for hospitality and high-traffic environments.**
